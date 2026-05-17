@@ -28,7 +28,12 @@ add_executable(resource_pool_tests
 
 target_include_directories(resource_pool_tests PRIVATE include)
 
-target_compile_options(resource_pool_tests PRIVATE -Wall -Wextra -Werror)
+#Adding warning flags for MSVC compilers
+if (MSVC)
+    target_compile_options(resource_pool_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(resource_pool_tests PRIVATE -Wall -Wextra -Werror)
+endif()
 
 target_link_libraries(resource_pool_tests PRIVATE GTest::gtest_main)
 
