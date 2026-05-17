@@ -1,4 +1,7 @@
 #pragma once
+#include <vector>
+#include <condition_variable>
+#include <queue>
 
 // TODO: Add necessary standard library includes.
 
@@ -25,19 +28,65 @@ template <typename T>
 class PoolHandle {
 public:
     // TODO: Implement.
+    // Default constructor needed for move assignment
+    PoolHandle() = default;
+
+    // user defined constructor
+    struct State {
+        std::vector<T> resources;
+        std::queue<std::size_t> available;
+        std::mutex mutex;
+        std::condition_variable cv;
+    };
+
+    std::shared_ptr<State> state_;
+
+    PoolHandle(std::shared_ptr<State> state, T* resource, std::size_t index)
+        : state_(std::move(state))
+        , resource_(resource)
+        , index_(index) {
+    }
 
     PoolHandle(const PoolHandle&) = delete;
     PoolHandle& operator=(const PoolHandle&) = delete;
 
     // TODO: Move constructor.
+    PoolHandle(PoolHandle&& other) noexcept
+        : state_(std::move(other.state_))
+        , resource_(other.resource_)
+        , index_(other.index_) {}
+
     // TODO: Move assignment operator.
+    PoolHandle& operator=(PoolHandle&& other) noexcept {
+        if (this != &other) {
+            state_ = std::move(other.state_);
+            resource_ = other.resource_;
+            index_ = other.index_;
+        }
 
+        return *this;
+    }
     // TODO: Destructor — return the resource to the pool.
-
+    ~PoolHandle() {}
     // TODO: operator* and operator->.
 
+    //non const versions 
+    T& operator*() { return *resource_; }
+
+    T* operator->() { return resource_; }
+
+    // const versions 
+    const T& operator*() const { return *resource_;}
+
+    const T* operator->() const { return resource_;}
+
 private:
+    void release()  {//TODO
+    }
     // TODO: Store a pointer/reference to the resource and back-reference to the pool.
+    T* resource_ = nullptr;
+    std::size_t index_ = 0;
+
 };
 
 // -----------------------------------------------------------------------------
