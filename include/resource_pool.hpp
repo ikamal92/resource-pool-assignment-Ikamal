@@ -36,20 +36,6 @@ public:
     // Default constructor needed for R7 and move assignment
     PoolHandle() = default;
 
-    // user defined constructor
-    struct State {
-        std::vector<T> resources; //resource storage
-        std::queue<std::size_t> available; // free slots
-        std::mutex mutex; //R5
-        std::condition_variable cv;//to blocks acquire until a slot is free (R2)
-        std::function<void(T&)> reset; ///cleanup "optional"(R6)
-    };
-
-    PoolHandle(std::shared_ptr<State> state, T* resource, std::size_t index)
-        : state_(std::move(state))
-        , resource_(resource)
-        , index_(index) {
-    }
 
     PoolHandle(const PoolHandle&) = delete;
     PoolHandle& operator=(const PoolHandle&) = delete;
@@ -66,6 +52,8 @@ public:
             state_ = std::move(other.state_);
             resource_ = other.resource_;
             index_ = other.index_;
+            other.resource_ = nullptr;
+            other.index_ = 0;
         }
 
         return *this;
@@ -85,12 +73,30 @@ public:
     const T* operator->() const { return resource_;}
 
 private:
+    // user defined constructor
+    struct State {
+        std::vector<T> resources; //resource storage
+        std::queue<std::size_t> available; // free slots
+        std::mutex mutex; //R5
+        std::condition_variable cv;//to blocks acquire until a slot is free (R2)
+        std::function<void(T&)> reset; ///cleanup "optional"(R6)
+    };
+
+    PoolHandle(std::shared_ptr<State> state, T* resource, std::size_t index)
+        : state_(std::move(state))
+        , resource_(resource)
+        , index_(index) {
+    }
 
     void release() noexcept {
         if (!state_ || !resource_) { return;}
 
         if (state_->reset) {
             try { state_->reset(*resource_); }
+            catch (...) {}
+        }
+        else {
+            try { *resource_ = T{}; }
             catch (...) {}
         }
        
@@ -175,7 +181,7 @@ public:
 
     // TODO: std::optional<PoolHandle<T>> acquire(/* timeout duration */);
 
-    }
+    
 
 private:
     std::shared_ptr<typename Handler::State> state_;

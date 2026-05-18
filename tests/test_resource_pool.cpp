@@ -23,6 +23,8 @@ TEST(ResourcePoolTest, BasicAcquireAndRelease) {
         EXPECT_EQ(h->value, 10);
     }
 
+    auto h2 = pool.acquire();
+    EXPECT_EQ(h2->value, 0);
 }
 
 // ── Test 2: Pool exhaustion — blocked acquire unblocks after release ──────────
