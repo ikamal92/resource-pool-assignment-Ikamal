@@ -110,7 +110,28 @@ TEST(ResourcePoolTest, ConcurrentAcquireRelease) {
 // for the next acquire().
 
 TEST(ResourcePoolTest, ResetFunctionCalledOnRelease) {
-    FAIL() << "Not implemented";
+    std::atomic<int> reset_count = 0;
+
+    ResourcePool<Resource> pool(
+        2,[] { return Resource{}; },
+        [&](Resource& r) 
+        {
+            r.value = 0;
+            reset_count++;
+        }
+    );
+
+    {
+        auto h1 = pool.acquire();
+        h1->value = 99;
+    }
+
+    {
+        auto h2 = pool.acquire();
+        EXPECT_EQ(h2->value, 0);
+    }
+
+    EXPECT_EQ(reset_count.load(), 4); // as the reset func runs twice at factory construction, also twice when the two resources released so the final counter is 4 
 }
 
 // ── Test 7: Moved-from handle is safely destructible ─────────────────────────
@@ -120,5 +141,9 @@ TEST(ResourcePoolTest, ResetFunctionCalledOnRelease) {
 // time.
 
 TEST(ResourcePoolTest, MovedFromHandleIsSafeToDestroy) {
-    FAIL() << "Not implemented";
+    ResourcePool<Resource> pool(1,[] { return Resource{};});
+
+    auto h1 = pool.acquire();
+    auto h2 = std::move(h1);
+
 }
