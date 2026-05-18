@@ -12,7 +12,17 @@ struct Resource {
 // resource available again after the handle is destroyed.
 
 TEST(ResourcePoolTest, BasicAcquireAndRelease) {
-    FAIL() << "Not implemented";
+    ResourcePool<Resource> pool(
+        1,
+        [] { return Resource{}; }
+    );
+
+    {
+        auto h = pool.acquire();
+        h->value = 10;
+        EXPECT_EQ(h->value, 10);
+    }
+
 }
 
 // ── Test 2: Pool exhaustion — blocked acquire unblocks after release ──────────
