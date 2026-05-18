@@ -33,7 +33,23 @@ TEST(ResourcePoolTest, BasicAcquireAndRelease) {
 // must block until the first handle is released.
 
 TEST(ResourcePoolTest, BlocksWhenExhaustedAndUnblocksOnRelease) {
-    FAIL() << "Not implemented";
+    ResourcePool<Resource> pool(1, [] { return Resource{}; });
+
+    auto h1 = pool.acquire();
+    std::atomic<bool> acquired{ false }; 
+
+    std::thread t([&] {
+        auto h2 = pool.acquire();
+        acquired = true;
+        });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_FALSE(acquired.load());
+
+    h1.~PoolHandle();  // release h1, now t should be unblocked
+    t.join();
+
+    EXPECT_TRUE(acquired.load());
 }
 
 // ── Test 3: Timed acquire returns empty optional on timeout ───────────────────
