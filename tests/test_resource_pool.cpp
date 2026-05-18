@@ -86,7 +86,21 @@ TEST(ResourcePoolTest, HandleReleasesOnScopeExit) {
 // (run with ThreadSanitizer to verify).
 
 TEST(ResourcePoolTest, ConcurrentAcquireRelease) {
-    FAIL() << "Not implemented";
+    ResourcePool<Resource> pool(4, [] { return Resource{}; });
+    std::atomic<int> counter{0};
+    auto worker = [&] {
+        for (int i = 0; i < 1000; i++) {
+            auto h = pool.acquire();  // acquire
+            h->value++;               // use
+            counter++;                // increase counter for testing 
+        }                             // Release 
+        };
+    std::thread t1(worker);
+    std::thread t2(worker);
+    std::thread t3(worker);
+    std::thread t4(worker);
+    t1.join(); t2.join(); t3.join(); t4.join();
+    EXPECT_EQ(counter.load(), 4000);
 }
 
 // ── Test 6: Reset function called on every release ───────────────────────────
