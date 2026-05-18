@@ -181,7 +181,21 @@ public:
 
     // TODO: std::optional<PoolHandle<T>> acquire(/* timeout duration */);
 
-    
+    template <class Rep, class Period>
+    std::optional<Handler> acquire(const std::chrono::duration<Rep, Period>& timeout) {
+        std::unique_lock<std::mutex> lock(state_->mutex);
+
+        bool got_one = state_->cv.wait_for(lock, timeout, [this] {
+            return !state_->available.empty(); });
+
+        if (!got_one)
+            return std::nullopt;
+
+        std::size_t index = state_->available.front();
+        state_->available.pop();
+
+        return Handler(state_, &state_->resources[index], index);
+    }
 
 private:
     std::shared_ptr<typename Handler::State> state_;

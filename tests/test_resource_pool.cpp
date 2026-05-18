@@ -12,11 +12,7 @@ struct Resource {
 // resource available again after the handle is destroyed.
 
 TEST(ResourcePoolTest, BasicAcquireAndRelease) {
-    ResourcePool<Resource> pool(
-        1,
-        [] { return Resource{}; }
-    );
-
+    ResourcePool<Resource> pool(1, [] { return Resource{}; });
     {
         auto h = pool.acquire();
         h->value = 10;
@@ -58,16 +54,29 @@ TEST(ResourcePoolTest, BlocksWhenExhaustedAndUnblocksOnRelease) {
 // within the given duration.
 
 TEST(ResourcePoolTest, TimedAcquireReturnsNulloptOnTimeout) {
-    FAIL() << "Not implemented";
+    ResourcePool<Resource> pool(1, [] { return Resource{}; });
+
+    auto h1 = pool.acquire();
+    auto result = pool.acquire(std::chrono::milliseconds(100));
+
+    EXPECT_FALSE(result.has_value());
 }
 
 // ── Test 4: RAII — resource returned automatically on scope exit ──────────────
 //
 // Destroying the handle (scope exit, not explicit call) must return the
 // resource to the pool and allow a subsequent acquire() to succeed.
-
+// Already Covered by Test 1
 TEST(ResourcePoolTest, HandleReleasesOnScopeExit) {
-    FAIL() << "Not implemented";
+    ResourcePool<Resource> pool(1, [] { return Resource{}; });
+    {
+        auto h = pool.acquire();
+        h->value = 10;
+        EXPECT_EQ(h->value, 10);
+    }
+
+    auto h2 = pool.acquire();
+    EXPECT_EQ(h2->value, 0);
 }
 
 // ── Test 5: Concurrent stress test ───────────────────────────────────────────
