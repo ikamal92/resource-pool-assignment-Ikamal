@@ -1,19 +1,23 @@
 #pragma once
-#include <vector>
-#include <condition_variable>
-#include <queue>
-#include <chrono>
-#include <functional>
-#include <utility>
-#include "stdexcept"
-#include <optional>
-#include <mutex>
-// TODO: Add necessary standard library includes.
+
+#include <vector>             // std::vector
+#include <condition_variable> // std::condition_variable 
+#include <queue>              // std::queue
+#include <chrono>             // std::chrono::duration
+#include <functional>         // std::function
+#include <utility>            // std::move
+#include <stdexcept>          // std::invalid_argument
+#include <optional>           // std::optional
+#include <mutex>              // std::mutex
+#include <memory>             // std::shared_ptr 
+#include <cstddef>            // std::size_t 
+
 
 // -----------------------------------------------------------------------------
 // Forward declaration
 // -----------------------------------------------------------------------------
-
+// PoolHandle<T> references ResourcePool<T> as a friend so ResourcePool can
+// call PoolHandle's private constructor so Forward declaration used 
 template <typename T>
 class ResourcePool;
 
@@ -32,21 +36,25 @@ class ResourcePool;
 template <typename T>
 class PoolHandle {
 public:
-    // TODO: Implement.
-    // Default constructor needed for R7 and move assignment
+
+    // Default constructor needed for moved-from handles are left in a valid state (R7).
+    // gives a handle that owns nothing. All pointers are null.
     PoolHandle() = default;
 
-
+    // Copy deleted R4, R7
+    // As copying a handle would give two owners of the same slot.
     PoolHandle(const PoolHandle&) = delete;
     PoolHandle& operator=(const PoolHandle&) = delete;
 
-    // TODO: Move constructor.
+    // Move constructor R7
+    //  'noexcept' as Move constructors should never throw. Marking noexcept allows <PoolHandle> to use the move
+    //   constructor instead of falling back to copy.
     PoolHandle(PoolHandle&& other) noexcept
         : state_(std::move(other.state_))
         , resource_(other.resource_)
         , index_(other.index_) {}
 
-    // TODO: Move assignment operator.
+    // Move assignment (R7)
     PoolHandle& operator=(PoolHandle&& other) noexcept {
         if (this != &other) {
             state_ = std::move(other.state_);
@@ -58,38 +66,46 @@ public:
 
         return *this;
     }
-    // TODO: Destructor — return the resource to the pool.
-    ~PoolHandle() { release(); } //R4:The RAII handle releases its resource automatically on destruction
-    // TODO: operator* and operator->.
+    // Destructor (R4) The RAII handle releases its resource automatically on destruction
+    ~PoolHandle() { release(); } 
 
-    //non const versions 
+
+    // non const versions 
+    // caller can modify the resource
     T& operator*() { return *resource_; }
 
     T* operator->() { return resource_; }
 
-    // const versions 
+    // const versions   
+    // caller can only READ
     const T& operator*() const { return *resource_;}
 
     const T* operator->() const { return resource_;}
 
 private:
-    // user defined constructor
+    // friend declaration
+    friend class ResourcePool<T>;
+
+    // State — the shared bridge between pool and handles
     struct State {
-        std::vector<T> resources; //resource storage
+        std::vector<T> resources; // resource storage
         std::queue<std::size_t> available; // free slots
-        std::mutex mutex; //R5
-        std::condition_variable cv;//to blocks acquire until a slot is free (R2)
-        std::function<void(T&)> reset; ///cleanup "optional"(R6)
+        std::mutex mutex; // Protects 'available' (R5)
+        std::condition_variable cv; // to blocks acquire until a slot is free (R2)
+        std::function<void(T&)> reset; // cleanup "optional" (R6)
     };
 
+    // Private (user defined) constructor, only called by ResourcePool::acquire()
     PoolHandle(std::shared_ptr<State> state, T* resource, std::size_t index)
         : state_(std::move(state))
         , resource_(resource)
         , index_(index) {
     }
 
+    // release() — return the resource to the pool
+    // noexcept: required because this is called from the destructor.
     void release() noexcept {
-        if (!state_ || !resource_) { return;}
+        if (!state_ || !resource_ || index_ == static_cast<std::size_t>(-1)) { return;}
 
         if (state_->reset) {
             try { state_->reset(*resource_); }
@@ -99,21 +115,27 @@ private:
             try { *resource_ = T{}; }
             catch (...) {}
         }
-       
-        std::lock_guard<std::mutex> lock(state_->mutex);
-        state_->available.push(index_);
+        // Return the slot index to the available queue (R5) 
+        {
+          std::lock_guard<std::mutex> lock(state_->mutex);
+          state_->available.push(index_);
+
+        }
+
+        // wake one thread that's waiting for a slot (R2).
         state_->cv.notify_one();
 
+        // ── Invalidate this handle (R7) ───────────────────────────────────────
+        // Null out pointer and set indez to -1 as if release() is 
+        // called again like from destructor of a moved-from handle, the guard at the top of the func exits immediately then no double-release.
         resource_ = nullptr;
-        index_ = 0;
+        index_ = static_cast<std::size_t>(-1);
     }
 
-
-    friend class ResourcePool<T>;
-    // TODO: Store a pointer/reference to the resource and back-reference to the pool.
-    std::shared_ptr<State> state_;
-    T* resource_ = nullptr;
-    std::size_t index_ = 0;
+    // Data members
+    std::shared_ptr<State> state_; // shared ownership of internal state.
+    T* resource_ = nullptr; // rraw pointer to the T object this handle owns.
+    std::size_t index_ = static_cast<std::size_t>(-1); //  Set to size_t(-1) as a no slot owned
 
 };
 
@@ -136,16 +158,17 @@ private:
 template <typename T>
 class ResourcePool {
 public:
-    using Handler = PoolHandle<T>;
+    // Alias
+    using Handle = PoolHandle<T>;
 
-    // TODO: Constructor.
-    //
+    // Constructor
+
     explicit ResourcePool(
          std::size_t capacity,
          std::function<T()> factory,
          std::function<void(T&)> reset = {}) 
-        : state_(std::make_shared<typename Handler::State>()) {
-        if (capacity == 0) {throw std::invalid_argument(" capacity should be greater then 1");}
+        : state_(std::make_shared<typename Handle::State>()) {
+        if (capacity == 0) {throw std::invalid_argument(" capacity should be greater then 1");}  // A pool with 0 slots >> useless.
 
         state_->reset = std::move(reset);
         state_->resources.reserve(capacity);
@@ -163,30 +186,30 @@ public:
     ResourcePool(ResourcePool&&) = delete;
     ResourcePool& operator=(ResourcePool&&) = delete;
 
-    // TODO: Destructor — document and implement your chosen destruction semantics.
+    // Destructor 
     ~ResourcePool() = default;
 
-    // TODO: PoolHandle<T> acquire();
+    // acquire() — blocking R2
 
-    Handler acquire() {
+    Handle acquire() {
         std::unique_lock<std::mutex> lock(state_->mutex);
 
-        state_->cv.wait(lock, [this] {return !state_->available.empty();});
+        state_->cv.wait(lock, [this] {return !state_->available.empty();}); //R5
 
         const std::size_t index = state_->available.front();
         state_->available.pop(); 
 
-        return Handler(state_, &state_->resources[index], index);
+        return Handle(state_, &state_->resources[index], index);
     }
 
-    // TODO: std::optional<PoolHandle<T>> acquire(/* timeout duration */);
+    // acquire(timeout)  R3
 
     template <class Rep, class Period>
-    std::optional<Handler> acquire(const std::chrono::duration<Rep, Period>& timeout) {
+    std::optional<Handle> acquire(const std::chrono::duration<Rep, Period>& timeout) {
         std::unique_lock<std::mutex> lock(state_->mutex);
 
         bool got_one = state_->cv.wait_for(lock, timeout, [this] {
-            return !state_->available.empty(); });
+            return !state_->available.empty(); }); // R5
 
         if (!got_one)
             return std::nullopt;
@@ -194,9 +217,10 @@ public:
         std::size_t index = state_->available.front();
         state_->available.pop();
 
-        return Handler(state_, &state_->resources[index], index);
+        return Handle(state_, &state_->resources[index], index);
     }
 
 private:
-    std::shared_ptr<typename Handler::State> state_;
+    // Data members
+    std::shared_ptr<typename Handle::State> state_;
 };
